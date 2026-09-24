@@ -111,6 +111,7 @@ def template_text(template_key):
 
 def builder_text(form):
     sections = [
+        ('TARGET ROLE', form.get('target_role', '')),
         ('PROFESSIONAL SUMMARY', form.get('summary', '')),
         ('EXPERIENCE', form.get('experience', '')),
         ('EDUCATION', form.get('education', '')),
@@ -121,8 +122,20 @@ def builder_text(form):
     return '\n\n'.join([personal] + [f'{title}\n{value}' for title, value in sections if value.strip()])
 
 def builder_values(resume):
-    text = resume['resume_text'] if resume else ''
-    return {'full_name': '', 'email': '', 'phone': '', 'links': '', 'summary': text, 'experience': '', 'education': '', 'projects': '', 'skills': resume['skills'] if resume else ''}
+    if resume:
+        return {'full_name': '', 'email': '', 'phone': '', 'links': '', 'target_role': '', 'summary': resume['resume_text'], 'experience': '', 'education': '', 'projects': '', 'skills': resume['skills'] or ''}
+    return {
+        'full_name': 'Aarish Nasim',
+        'email': 'aarish.nasim@example.com',
+        'phone': '+91 98765 43210',
+        'links': 'linkedin.com/in/aarishnasim | github.com/aarishnasim',
+        'target_role': 'Software Engineer / AI-ML Engineer',
+        'summary': 'Software engineer focused on building reliable AI-powered products and scalable web experiences.',
+        'experience': 'Software Engineer Intern | TechNova | 2024 - Present\n- Built Flask APIs and WebSocket workflows that improved response time by 32%.\n- Shipped machine learning features from prototype to production.',
+        'education': 'B.Tech Computer Science and Engineering | State University | 2025',
+        'projects': 'Resume Atlas | Built an ATS-aware resume platform with Flask, React patterns, and PDF export.\nSmart Recommender | Designed a machine learning recommendation pipeline for skills and job matching.',
+        'skills': 'Python, JavaScript, Flask, React, SQL, Machine Learning, WebSockets',
+    }
 
 @app.route('/')
 def home(): return render_template('index.html')
@@ -172,21 +185,45 @@ def dashboard():
         'formatting': 'Use standard section headings and keep bullet points concise.' if ats < 85 else 'Your structure is easy for ATS systems to scan.',
         'impact': 'Start bullets with strong verbs and include measurable outcomes.' if ats < 90 else 'Your bullets show clear impact.',
     }
-    return render_template('dashboard.html', name=session['name'], resume=resume, results=results, ats=ats, templates=RESUME_TEMPLATES, active_template=active_template, feedback=feedback)
+    strengths = [
+        f'{len(extract_skills(resume["resume_text"]))} relevant skills detected.' if resume else 'Upload a resume to detect your strongest skills.',
+        'Readable section hierarchy found.' if resume and ats >= 50 else 'Use standard resume section headings.',
+        'Job matching is ready after analysis.' if resume else 'Your analysis will unlock job matching.',
+    ]
+    return render_template('dashboard.html', name=session['name'], resume=resume, results=results, ats=ats, templates=RESUME_TEMPLATES, active_template=active_template, feedback=feedback, strengths=strengths, focus=request.args.get('focus', ''))
+
+@app.route('/analyze')
+def analyze():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    return redirect(url_for('dashboard', focus='analyze') + '#analyze-panel')
 
 @app.route('/upload', methods=['POST'])
+@app.route('/api/upload', methods=['POST'])
 def upload():
-    if 'user_id' not in session: return redirect(url_for('login'))
+    is_api = request.path == '/api/upload'
+    if 'user_id' not in session:
+        if is_api: return jsonify({'error': 'Please log in first.'}), 401
+        return redirect(url_for('login'))
     file=request.files.get('resume')
-    if not file or not file.filename: flash('Please choose a PDF or DOCX resume.','error'); return redirect(url_for('dashboard'))
+    if not file or not file.filename:
+        if is_api: return jsonify({'error': 'Please choose a PDF or DOCX resume.'}), 400
+        flash('Please choose a PDF or DOCX resume.','error'); return redirect(url_for('dashboard'))
     ext=file.filename.rsplit('.',1)[-1].lower() if '.' in file.filename else ''
-    if ext not in ALLOWED: flash('Only PDF and DOCX files are allowed.','error'); return redirect(url_for('dashboard'))
+    if ext not in ALLOWED:
+        if is_api: return jsonify({'error': 'Only PDF and DOCX files are allowed.'}), 400
+        flash('Only PDF and DOCX files are allowed.','error'); return redirect(url_for('dashboard'))
     filename=secure_filename(file.filename); path=os.path.join(UPLOADS, filename); file.save(path)
     try: text=extract_text(path)
-    except Exception as e: flash(f'Could not read resume: {e}','error'); return redirect(url_for('dashboard'))
-    if not text.strip(): flash('No readable text found in the resume.','error'); return redirect(url_for('dashboard'))
+    except Exception as e:
+        if is_api: return jsonify({'error': f'Could not read resume: {e}'}), 400
+        flash(f'Could not read resume: {e}','error'); return redirect(url_for('dashboard'))
+    if not text.strip():
+        if is_api: return jsonify({'error': 'No readable text found in the resume.'}), 400
+        flash('No readable text found in the resume.','error'); return redirect(url_for('dashboard'))
     skills=extract_skills(text)
     con=db(); con.execute('DELETE FROM resumes WHERE user_id=?',(session['user_id'],)); con.execute('INSERT INTO resumes(user_id,filename,resume_text,skills,source_path,source_type) VALUES(?,?,?,?,?,?)',(session['user_id'],filename,text,', '.join(skills),path,ext)); con.commit(); con.close()
+    if is_api:
+        return jsonify({'status': 'ok', 'skills': skills, 'ats_score': ats_score(text), 'redirect': url_for('dashboard')})
     flash(f'Resume analyzed. Found {len(skills)} skills.','success'); return redirect(url_for('dashboard'))
 
 @app.route('/update-resume', methods=['POST'])
@@ -207,6 +244,11 @@ def update_resume():
 def template_gallery():
     if 'user_id' not in session: return redirect(url_for('login'))
     return render_template('template_gallery.html', template_groups=template_choices(), templates=TEMPLATES)
+
+@app.route('/builder')
+def builder_index():
+    if 'user_id' not in session: return redirect(url_for('login'))
+    return redirect(url_for('template_gallery'))
 
 @app.route('/builder/<template_id>', methods=['GET', 'POST'])
 def builder(template_id):
