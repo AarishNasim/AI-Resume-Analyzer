@@ -2,6 +2,12 @@ const improveButton = document.querySelector('#ai-improve');
 const resumeText = document.querySelector('#resume-text');
 const targetRole = document.querySelector('#target-role');
 const aiStatus = document.querySelector('#ai-status');
+const resumeFile = document.querySelector('#resume-file');
+const fileName = document.querySelector('#file-name');
+
+resumeFile?.addEventListener('change', () => {
+    fileName.textContent = resumeFile.files[0]?.name || 'Choose PDF or DOCX';
+});
 
 if (improveButton) {
     improveButton.addEventListener('click', async () => {
