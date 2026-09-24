@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+resume_analyzer.db
+uploads/*
+!uploads/.gitkeep
