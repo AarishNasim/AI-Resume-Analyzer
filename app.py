@@ -127,6 +127,15 @@ def builder_values(resume):
 @app.route('/')
 def home(): return render_template('index.html')
 
+@app.route('/health', methods=['GET'])
+@app.route('/healthcheck', methods=['GET'])
+def healthcheck():
+    try:
+        con = db(); con.execute('SELECT 1'); con.close()
+        return jsonify({'status': 'ok'}), 200
+    except sqlite3.Error:
+        return jsonify({'status': 'error'}), 503
+
 @app.route('/register', methods=['GET','POST'])
 def register():
     if request.method == 'POST':
