@@ -1,1 +1,44 @@
-<!doctype html><html><head><title>Dashboard</title><link rel="stylesheet" href="{{url_for('static',filename='css/style.css')}}"></head><body><nav><b>Dashboard</b><span>Hi, {{name}} | <a href="{{url_for('logout')}}">Logout</a></span></nav><main><div class="card"><h2>Upload Resume</h2><form action="{{url_for('upload')}}" method="post" enctype="multipart/form-data"><input type="file" name="resume" accept=".pdf,.docx" required><button class="btn">Analyze Resume</button></form>{% with messages=get_flashed_messages(with_categories=true) %}{% for c,m in messages %}<div class="msg {{c}}">{{m}}</div>{% endfor %}{% endwith %}</div>{% if resume %}<div class="card"><h2>Resume Result</h2><p><b>File:</b> {{resume.filename}}</p><p><b>Skills:</b> {{resume.skills or 'No listed skills found'}}</p></div><h2>Recommended Jobs</h2><div class="grid">{% for j in results %}<div class="card"><h3>{{j.title}}</h3><p>{{j.company}} · {{j.location}}</p><div class="score">{{j.score}}% match</div><p><b>Required:</b> {{j.required_skills}}</p><p><b>Matched:</b> {{j.matched|join(', ') or 'None'}}</p><form action="{{url_for('save_job',job_id=j.id)}}" method="post"><button class="btn">Save Job</button></form></div>{% endfor %}</div>{% endif %}</main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Resume Studio | AI Resume Analyzer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{url_for('static',filename='css/style.css')}}">
+</head>
+<body class="app-shell">
+    <nav class="topbar">
+        <a class="brand" href="{{url_for('home')}}"><span class="brand-mark">RA</span><span>Resume Atlas</span></a>
+        <div class="user-menu"><span>Hi, {{name}}</span><a href="{{url_for('logout')}}">Log out</a></div>
+    </nav>
+    <main class="workspace">
+        <header class="page-heading">
+            <div><p class="eyebrow">RESUME STUDIO / 01</p><h1>Make your next move count.</h1><p class="subheading">Polish your story, strengthen your ATS signal, and leave with a resume ready to send.</p></div>
+            <a class="button button-dark" href="{{url_for('template_gallery')}}">Create new resume <span>-></span></a>
+        </header>
+        {% with messages=get_flashed_messages(with_categories=true) %}{% for c,m in messages %}<div class="msg {{c}}">{{m}}</div>{% endfor %}{% endwith %}
+        <section class="studio-grid">
+            <div class="editor-column">
+                {% if resume %}
+                <div class="panel analysis-card"><div class="analysis-header"><div><p class="eyebrow">RESUME ANALYSIS</p><h2>Your resume, at a glance.</h2><p class="muted">Actionable feedback based on structure, keywords, and recruiter readability.</p></div><a class="button button-accent" href="{{url_for('builder', template_id=active_template.id)}}">Edit &amp; improve</a></div><div class="feedback-grid"><div class="feedback-item"><span class="feedback-icon">K</span><div><strong>Missing keywords</strong><p>{{feedback.keywords}}</p></div></div><div class="feedback-item"><span class="feedback-icon">F</span><div><strong>Formatting</strong><p>{{feedback.formatting}}</p></div></div><div class="feedback-item"><span class="feedback-icon">I</span><div><strong>Bullet impact</strong><p>{{feedback.impact}}</p></div></div></div></div>
+                <div class="panel action-panel"><div><p class="eyebrow">READY TO SEND?</p><h2>{{resume.filename}}</h2><p class="muted">Your latest version is saved. Export a selectable PDF or editable DOCX.</p></div><div class="editor-actions"><a class="button button-dark" href="{{url_for('download_pdf')}}">Download PDF</a><a class="button button-light" href="{{url_for('download_resume')}}">Download DOCX</a></div></div>
+                {% endif %}
+            </div>
+            <aside class="insights-column">
+                <div class="panel ats-panel">
+                    <div class="panel-header"><div><p class="eyebrow">ATS HEALTH</p><h2>How searchable are you?</h2></div><span class="info-dot">i</span></div>
+                    {% if resume %}<div class="ats-score" style="--score: {{ats}}"><div><strong>{{ats}}</strong><span>/ 100</span></div></div><p class="score-label">{% if ats >= 75 %}Strong signal{% elif ats >= 50 %}Good foundation{% else %}Needs attention{% endif %}</p>{% else %}<div class="empty-score">--</div><p class="score-label">Create a resume to calculate</p>{% endif %}
+                    <div class="score-legend"><span><i class="dot green"></i>Structure</span><span><i class="dot blue"></i>Skills</span><span><i class="dot orange"></i>Contact</span></div>
+                </div>
+                {% if resume %}<div class="panel details-panel"><p class="eyebrow">DETECTED PROFILE</p><div class="detail-row"><span>File</span><strong>{{resume.filename}}</strong></div><div class="detail-row"><span>Skills found</span><strong>{{resume.skills.split(', ')|length if resume.skills else 0}}</strong></div><div class="skill-list">{% for skill in (resume.skills.split(', ') if resume.skills else []) %}<span>{{skill}}</span>{% endfor %}</div></div>{% endif %}
+            </aside>
+        </section>
+        {% if resume %}<section class="jobs-section"><div class="section-heading"><div><p class="eyebrow">NEXT BEST FIT</p><h2>Roles that match your signal</h2></div><span class="muted">{{results|length}} opportunities</span></div><div class="job-grid">{% for j in results %}<article class="job-card"><div class="job-top"><div><h3>{{j.title}}</h3><p>{{j.company}} · {{j.location}}</p></div><strong>{{j.score}}%</strong></div><div class="progress"><span style="width: {{j.score}}%"></span></div><p class="job-meta"><b>Matched:</b> {{j.matched|join(', ') or 'Add more matching skills'}}</p><form action="{{url_for('save_job',job_id=j.id)}}" method="post"><button class="text-button" type="submit">Save role <span>-></span></button></form></article>{% endfor %}</div></section>{% endif %}
+        <section class="formats-section"><div class="section-heading"><div><p class="eyebrow">START FRESH</p><h2>Explore 60 professional formats</h2><p class="muted">Choose a layout first, then bring your story into the live builder.</p></div><a class="text-button" href="{{url_for('template_gallery')}}">View full gallery -></a></div></section>
+    </main>
+    <script src="{{url_for('static',filename='js/script.js')}}"></script>
+</body>
+</html>

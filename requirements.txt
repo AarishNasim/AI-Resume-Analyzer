@@ -3,3 +3,4 @@ Werkzeug
 pypdf
 python-docx
 scikit-learn
+reportlab
