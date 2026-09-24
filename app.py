@@ -1,5 +1,6 @@
 import io, os, sqlite3
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
+from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from services.resume_parser import extract_text
@@ -8,14 +9,26 @@ from services.matcher import match_jobs
 from services.template_engine import TEMPLATES, get_template, template_choices
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DB = os.path.join(BASE, 'resume_analyzer.db')
-UPLOADS = os.path.join(BASE, 'uploads')
+APP_ENV = os.environ.get('APP_ENV', 'development').lower()
+DB = os.environ.get('DATABASE_PATH', os.path.join(BASE, 'resume_analyzer.db'))
+UPLOADS = os.environ.get('UPLOADS_DIR', os.path.join(BASE, 'uploads'))
 os.makedirs(UPLOADS, exist_ok=True)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-change-this-secret-key')
+secret_key = os.environ.get('SECRET_KEY')
+if APP_ENV == 'production' and not secret_key:
+    raise RuntimeError('SECRET_KEY must be set when APP_ENV=production')
+app.secret_key = secret_key or 'dev-change-this-secret-key'
 app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024
 ALLOWED = {'pdf', 'docx'}
+
+configured_origins = [origin.strip() for origin in os.environ.get('CORS_ORIGINS', '').split(',') if origin.strip()]
+frontend_url = os.environ.get('FRONTEND_URL')
+if frontend_url:
+    configured_origins.append(frontend_url.rstrip('/'))
+if not configured_origins and APP_ENV != 'production':
+    configured_origins = ['http://127.0.0.1:5000', 'http://localhost:5000']
+CORS(app, resources={r'/*': {'origins': configured_origins}}, supports_credentials=True)
 
 RESUME_TEMPLATES = {
     'classic': ('Classic Professional', 'Traditional, polished, and easy for ATS systems to scan.', 'CLASSIC PROFESSIONAL RESUME'),
@@ -273,5 +286,7 @@ def save_job(job_id):
     con.close(); flash('Job saved.','success'); return redirect(url_for('dashboard'))
 
 if __name__=='__main__':
-    init_db(); app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    init_db()
+    app.run(host='0.0.0.0', port=port)
 else: init_db()

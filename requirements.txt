@@ -1,5 +1,7 @@
 Flask
 Werkzeug
+Flask-Cors
+gunicorn
 pypdf
 python-docx
 scikit-learn
