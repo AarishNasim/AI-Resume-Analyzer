@@ -1,1 +1,59 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Log in | Resume Atlas</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="{{url_for('static',filename='css/style.css')}}"></head><body class="auth-page"><a class="brand auth-brand" href="{{url_for('home')}}"><span class="brand-mark">RA</span><span>Resume Atlas</span></a><main class="auth-card"><p class="eyebrow">WELCOME BACK</p><h1>Pick up where you left off.</h1><p class="muted">Your resume workspace is waiting.</p>{% with messages=get_flashed_messages(with_categories=true) %}{% for c,m in messages %}<div class="msg {{c}}">{{m}}</div>{% endfor %}{% endwith %}<form method="post" class="auth-form"><label>Email<input name="email" type="email" placeholder="you@example.com" required></label><label>Password<input name="password" type="password" placeholder="Your password" required></label><button class="button button-dark" type="submit">Log in</button></form><p class="auth-footer">New to Resume Atlas? <a href="{{url_for('register')}}">Create an account</a></p></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Log in | Resume Atlas</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="auth-page">
+    <a class="brand auth-brand" href="{{ url_for('home') }}"><span class="brand-mark">RA</span><span>Resume Atlas</span></a>
+    <main class="auth-card">
+        <p class="eyebrow">WELCOME BACK</p>
+        <h1>Pick up where you left off.</h1>
+        <p class="muted">Your resume workspace is waiting.</p>
+        <p id="login-status" class="form-status" role="status" aria-live="polite">{{ error or '' }}</p>
+        <form method="post" class="auth-form" id="login-form">
+            <label>Username or email
+                <input name="identifier" id="login-identifier" autocomplete="username" placeholder="you@example.com" required>
+            </label>
+            <label>Password
+                <input name="password" type="password" autocomplete="current-password" placeholder="Your password" required>
+            </label>
+            <button class="button button-dark" type="submit">Log in</button>
+        </form>
+        <div class="forgot-reveal is-hidden" id="forgot-reveal" aria-hidden="true">
+            <button class="text-button" type="button" id="forgot-password">Forgot Password?</button>
+        </div>
+        <p class="auth-footer">New to Resume Atlas? <a href="{{ url_for('auth.register') }}">Create an account</a></p>
+    </main>
+
+    <div class="otp-modal is-hidden" id="reset-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+        <div class="otp-modal-card">
+            <button class="modal-close" type="button" id="close-reset-modal" aria-label="Close">&times;</button>
+            <p class="eyebrow">ACCOUNT RECOVERY</p>
+            <h2 id="reset-title">Reset your password</h2>
+            <p class="muted" id="reset-status">We sent a six-digit code to your verified email.</p>
+            <form class="auth-form" id="reset-otp-form">
+                <label>Verification code
+                    <input name="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+                </label>
+                <button class="button button-dark" type="submit">Verify code</button>
+            </form>
+            <form class="auth-form is-hidden" id="new-password-form">
+                <label>New password
+                    <input name="new_password" type="password" autocomplete="new-password" minlength="8" required>
+                </label>
+                <label>Confirm new password
+                    <input name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
+                </label>
+                <button class="button button-dark" type="submit">Update password</button>
+            </form>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>

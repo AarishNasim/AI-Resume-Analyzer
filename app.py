@@ -1,343 +1,107 @@
-import io, os, sqlite3
-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file
+import os
+
+from flask import Flask, jsonify, render_template
 from flask_cors import CORS
-from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
-from services.resume_parser import extract_text
-from services.skill_extractor import extract_skills
-from services.matcher import match_jobs
-from services.template_engine import TEMPLATES, get_template, template_choices
+from sqlalchemy import inspect as sqlalchemy_inspect
+from sqlalchemy import text
 
-BASE = os.path.dirname(os.path.abspath(__file__))
-APP_ENV = os.environ.get('APP_ENV', 'development').lower()
-DB = os.environ.get('DATABASE_PATH', os.path.join(BASE, 'resume_analyzer.db'))
-UPLOADS = os.environ.get('UPLOADS_DIR', os.path.join(BASE, 'uploads'))
-os.makedirs(UPLOADS, exist_ok=True)
+from config import config_by_name
+from models import db
+from routes.analyzer_routes import analyzer_bp
+from routes.auth_routes import auth_bp
+from routes.builder_routes import builder_bp
+from routes.firebase_routes import firebase_bp
+from services.firebase_config import get_firestore
 
-app = Flask(__name__)
-secret_key = os.environ.get('SECRET_KEY')
-if APP_ENV == 'production' and not secret_key:
-    raise RuntimeError('SECRET_KEY must be set when APP_ENV=production')
-app.secret_key = secret_key or 'dev-change-this-secret-key'
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024
-ALLOWED = {'pdf', 'docx'}
 
-configured_origins = [origin.strip() for origin in os.environ.get('CORS_ORIGINS', '').split(',') if origin.strip()]
-frontend_url = os.environ.get('FRONTEND_URL')
-if frontend_url:
-    configured_origins.append(frontend_url.rstrip('/'))
-if not configured_origins and APP_ENV != 'production':
-    configured_origins = ['http://127.0.0.1:5000', 'http://localhost:5000']
-CORS(app, resources={r'/*': {'origins': configured_origins}}, supports_credentials=True)
+def _cors_origins(value: str) -> list[str]:
+    origins = [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+    frontend_url = os.getenv("FRONTEND_URL")
+    if frontend_url:
+        origins.append(frontend_url.rstrip("/"))
+    return origins
 
-RESUME_TEMPLATES = {
-    'classic': ('Classic Professional', 'Traditional, polished, and easy for ATS systems to scan.', 'CLASSIC PROFESSIONAL RESUME'),
-    'modern': ('Modern Minimal', 'Clean hierarchy with a confident, contemporary feel.', 'MODERN MINIMAL RESUME'),
-    'executive': ('Executive Impact', 'Space for leadership wins, scope, and measurable outcomes.', 'EXECUTIVE IMPACT RESUME'),
-    'technical': ('Technical Builder', 'Skills-forward structure for engineering and technical roles.', 'TECHNICAL BUILDER RESUME'),
-    'creative': ('Creative Portfolio', 'A flexible format for designers, writers, and brand makers.', 'CREATIVE PORTFOLIO RESUME'),
-    'student': ('Early Career', 'Guided sections for students, interns, and career starters.', 'EARLY CAREER RESUME'),
-}
 
-def db():
-    con = sqlite3.connect(DB)
-    con.row_factory = sqlite3.Row
-    return con
+def _ensure_auth_columns() -> None:
+    """Add auth columns for installations created before username support."""
+    inspector = sqlalchemy_inspect(db.engine)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    additions = []
+    if "password_hash" not in columns:
+        additions.append("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)")
+    if "username" not in columns:
+        additions.append("ALTER TABLE users ADD COLUMN username VARCHAR(64)")
+    if "email_verified" not in columns:
+        additions.append("ALTER TABLE users ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT FALSE")
+    for statement in additions:
+        db.session.execute(text(statement))
+    if "password_hash" not in columns and "password" in columns:
+        db.session.execute(
+            text("UPDATE users SET password_hash = password WHERE password_hash IS NULL")
+        )
+    # Store a case-insensitive uniqueness guarantee for usernames in SQL.
+    # The index is safe to re-run during every application start.
+    db.session.execute(
+        text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username_lower ON users (LOWER(username))")
+    )
+    db.session.commit()
 
-def init_db():
-    con = db()
-    con.executescript('''
-    CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
-    CREATE TABLE IF NOT EXISTS resumes(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, filename TEXT, resume_text TEXT, skills TEXT, score REAL, uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id));
-    CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, company TEXT NOT NULL, description TEXT NOT NULL, required_skills TEXT NOT NULL, location TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS applications(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, job_id INTEGER, match_percentage REAL, status TEXT DEFAULT 'Saved', applied_at TEXT DEFAULT CURRENT_TIMESTAMP);
-    ''')
-    columns = {row[1] for row in con.execute('PRAGMA table_info(resumes)').fetchall()}
-    if 'source_path' not in columns: con.execute('ALTER TABLE resumes ADD COLUMN source_path TEXT')
-    if 'source_type' not in columns: con.execute('ALTER TABLE resumes ADD COLUMN source_type TEXT')
-    if 'template_key' not in columns: con.execute('ALTER TABLE resumes ADD COLUMN template_key TEXT')
-    if con.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 0:
-        jobs = [
-        ('Python Developer','TechNova','Build Flask APIs and backend services.','Python, Flask, SQL, REST API, Git','Noida / Remote'),
-        ('Data Analyst','DataBridge','Analyze business data and create reports.','Python, SQL, Pandas, Excel, Statistics','Delhi'),
-        ('ML Intern','AI Labs','Work on machine learning and NLP experiments.','Python, Machine Learning, Pandas, Scikit-learn, NLP','Jaipur / Remote'),
-        ('Frontend Developer','WebCraft','Create responsive web interfaces.','HTML, CSS, JavaScript, React, Git','Hyderabad'),
-        ('Full Stack Developer','CodeWorks','Develop frontend and backend features.','Python, JavaScript, Flask, HTML, CSS, SQL','Noida')]
-        con.executemany('INSERT INTO jobs(title,company,description,required_skills,location) VALUES(?,?,?,?,?)', jobs)
-    con.commit(); con.close()
 
-def ats_score(text):
-    content = text.lower()
-    skills = extract_skills(text)
-    sections = ['experience', 'education', 'skills']
-    section_score = sum(section in content for section in sections) / len(sections) * 30
-    skill_score = min(len(skills) / 10, 1) * 35
-    length_score = 20 if 250 <= len(text.split()) <= 900 else 10 if len(text.split()) >= 120 else 0
-    contact_score = 15 if any(marker in content for marker in ['@', 'phone', 'linkedin']) else 0
-    return round(min(section_score + skill_score + length_score + contact_score, 100))
+def create_app(config_name: str | None = None) -> Flask:
+    environment = (config_name or os.getenv("APP_ENV", "development")).lower()
+    config_class = config_by_name.get(environment, config_by_name["development"])
 
-def ai_improve_resume(text, target_role):
-    target_role = target_role.strip() or 'your target role'
-    replacements = {'responsible for': 'led', 'worked on': 'delivered', 'helped with': 'supported', 'made': 'created'}
-    lines = text.splitlines()
-    improved = []
-    role_added = False
-    for line in lines:
-        updated = line
-        if line.strip() and not line.strip().isupper() and not role_added:
-            updated = f'{line.rstrip()} | Target role: {target_role}'
-            role_added = True
-        for old, new in replacements.items():
-            updated = updated.replace(old, new).replace(old.title(), new.title())
-        improved.append(updated)
-    return '\n'.join(improved)
+    if environment == "production" and not os.getenv("SECRET_KEY"):
+        raise RuntimeError("SECRET_KEY must be set in production.")
 
-def update_docx_in_place(source_path, edited_text):
-    from docx import Document
-    document = Document(source_path)
-    original_paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
-    edited_lines = [line for line in edited_text.splitlines() if line.strip()]
-    for paragraph, value in zip(original_paragraphs, edited_lines):
-        if paragraph.runs:
-            paragraph.runs[0].text = value
-            for run in paragraph.runs[1:]: run.text = ''
+    app = Flask(__name__)
+    app.config.from_object(config_class)
+    if app.config["DATA_BACKEND"] != "firebase":
+        db.init_app(app)
+
+    CORS(
+        app,
+        resources={r"/*": {"origins": _cors_origins(app.config["CORS_ORIGINS"])}},
+        supports_credentials=True,
+    )
+
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(analyzer_bp)
+    app.register_blueprint(builder_bp)
+    app.register_blueprint(firebase_bp)
+
+    @app.get("/")
+    def home():
+        return render_template("index.html")
+
+    @app.get("/health")
+    def health():
+        if app.config["DATA_BACKEND"] == "firebase":
+            next(get_firestore().collection("users").limit(1).stream(), None)
         else:
-            paragraph.add_run(value)
-    document.save(source_path)
+            db.session.execute(text("SELECT 1"))
+        return jsonify({"status": "ok"})
 
-def template_text(template_key):
-    title = RESUME_TEMPLATES[template_key][2]
-    return f'''{title}\n\nFULL NAME\nEmail | Phone | LinkedIn | City, Country\n\nPROFESSIONAL SUMMARY\nWrite a focused 2-3 line summary for your target role.\n\nEXPERIENCE\nJob Title | Company | Dates\n- Describe an achievement with a measurable result.\n- Add the tools, scope, and impact of your work.\n\nEDUCATION\nDegree | Institution | Graduation Year\n\nSKILLS\nAdd relevant technical and professional skills.\n'''
+    @app.errorhandler(404)
+    def not_found(_error):
+        return jsonify({"error": "Resource not found."}), 404
 
-def builder_text(form):
-    sections = [
-        ('TARGET ROLE', form.get('target_role', '')),
-        ('PROFESSIONAL SUMMARY', form.get('summary', '')),
-        ('EXPERIENCE', form.get('experience', '')),
-        ('EDUCATION', form.get('education', '')),
-        ('PROJECTS', form.get('projects', '')),
-        ('SKILLS', form.get('skills', '')),
-    ]
-    personal = ' | '.join(value for value in [form.get('full_name', ''), form.get('email', ''), form.get('phone', ''), form.get('links', '')] if value)
-    return '\n\n'.join([personal] + [f'{title}\n{value}' for title, value in sections if value.strip()])
+    @app.errorhandler(500)
+    def internal_server_error(_error):
+        if app.config["DATA_BACKEND"] != "firebase":
+            db.session.rollback()
+        return jsonify({"error": "Internal server error."}), 500
 
-def builder_values(resume):
-    if resume:
-        return {'full_name': '', 'email': '', 'phone': '', 'links': '', 'target_role': '', 'summary': resume['resume_text'], 'experience': '', 'education': '', 'projects': '', 'skills': resume['skills'] or ''}
-    return {
-        'full_name': 'Aarish Nasim',
-        'email': 'aarish.nasim@example.com',
-        'phone': '+91 98765 43210',
-        'links': 'linkedin.com/in/aarishnasim | github.com/aarishnasim',
-        'target_role': 'Software Engineer / AI-ML Engineer',
-        'summary': 'Software engineer focused on building reliable AI-powered products and scalable web experiences.',
-        'experience': 'Software Engineer Intern | TechNova | 2024 - Present\n- Built Flask APIs and WebSocket workflows that improved response time by 32%.\n- Shipped machine learning features from prototype to production.',
-        'education': 'B.Tech Computer Science and Engineering | State University | 2025',
-        'projects': 'Resume Atlas | Built an ATS-aware resume platform with Flask, React patterns, and PDF export.\nSmart Recommender | Designed a machine learning recommendation pipeline for skills and job matching.',
-        'skills': 'Python, JavaScript, Flask, React, SQL, Machine Learning, WebSockets',
-    }
+    if app.config["DATA_BACKEND"] != "firebase":
+        with app.app_context():
+            db.create_all()
+            _ensure_auth_columns()
 
-@app.route('/')
-def home(): return render_template('index.html')
+    return app
 
-@app.route('/health', methods=['GET'])
-@app.route('/healthcheck', methods=['GET'])
-def healthcheck():
-    try:
-        con = db(); con.execute('SELECT 1'); con.close()
-        return jsonify({'status': 'ok'}), 200
-    except sqlite3.Error:
-        return jsonify({'status': 'error'}), 503
 
-@app.route('/register', methods=['GET','POST'])
-def register():
-    if request.method == 'POST':
-        name=request.form.get('name','').strip(); email=request.form.get('email','').strip().lower(); password=request.form.get('password','')
-        if not name or not email or len(password)<6: flash('Name, email and password (6+ characters) are required.','error'); return render_template('register.html')
-        try:
-            con=db(); con.execute('INSERT INTO users(name,email,password) VALUES(?,?,?)',(name,email,generate_password_hash(password))); con.commit(); con.close()
-            flash('Registration successful. Please login.','success'); return redirect(url_for('login'))
-        except sqlite3.IntegrityError: flash('Email already registered.','error')
-    return render_template('register.html')
+app = create_app()
 
-@app.route('/login', methods=['GET','POST'])
-def login():
-    if request.method=='POST':
-        email=request.form.get('email','').strip().lower(); password=request.form.get('password','')
-        con=db(); user=con.execute('SELECT * FROM users WHERE email=?',(email,)).fetchone(); con.close()
-        if user and check_password_hash(user['password'],password):
-            session['user_id']=user['id']; session['name']=user['name']; return redirect(url_for('dashboard'))
-        flash('Invalid email or password.','error')
-    return render_template('login.html')
 
-@app.route('/logout')
-def logout(): session.clear(); return redirect(url_for('home'))
-
-@app.route('/dashboard')
-def dashboard():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    con=db(); resume=con.execute('SELECT * FROM resumes WHERE user_id=? ORDER BY id DESC LIMIT 1',(session['user_id'],)).fetchone(); jobs=con.execute('SELECT * FROM jobs').fetchall(); con.close()
-    results=match_jobs(resume['resume_text'], jobs) if resume else []
-    ats = ats_score(resume['resume_text']) if resume else 0
-    active_template = (get_template(resume['template_key']) if resume and resume['template_key'] else None) or TEMPLATES[0]
-    feedback = {
-        'keywords': 'Add role-specific keywords from the job description.' if ats < 75 else 'Your keyword coverage is in good shape.',
-        'formatting': 'Use standard section headings and keep bullet points concise.' if ats < 85 else 'Your structure is easy for ATS systems to scan.',
-        'impact': 'Start bullets with strong verbs and include measurable outcomes.' if ats < 90 else 'Your bullets show clear impact.',
-    }
-    strengths = [
-        f'{len(extract_skills(resume["resume_text"]))} relevant skills detected.' if resume else 'Upload a resume to detect your strongest skills.',
-        'Readable section hierarchy found.' if resume and ats >= 50 else 'Use standard resume section headings.',
-        'Job matching is ready after analysis.' if resume else 'Your analysis will unlock job matching.',
-    ]
-    return render_template('dashboard.html', name=session['name'], resume=resume, results=results, ats=ats, templates=RESUME_TEMPLATES, active_template=active_template, feedback=feedback, strengths=strengths, focus=request.args.get('focus', ''))
-
-@app.route('/analyze')
-def analyze():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    return redirect(url_for('dashboard', focus='analyze') + '#analyze-panel')
-
-@app.route('/upload', methods=['POST'])
-@app.route('/api/upload', methods=['POST'])
-def upload():
-    is_api = request.path == '/api/upload'
-    if 'user_id' not in session:
-        if is_api: return jsonify({'error': 'Please log in first.'}), 401
-        return redirect(url_for('login'))
-    file=request.files.get('resume')
-    if not file or not file.filename:
-        if is_api: return jsonify({'error': 'Please choose a PDF or DOCX resume.'}), 400
-        flash('Please choose a PDF or DOCX resume.','error'); return redirect(url_for('dashboard'))
-    ext=file.filename.rsplit('.',1)[-1].lower() if '.' in file.filename else ''
-    if ext not in ALLOWED:
-        if is_api: return jsonify({'error': 'Only PDF and DOCX files are allowed.'}), 400
-        flash('Only PDF and DOCX files are allowed.','error'); return redirect(url_for('dashboard'))
-    filename=secure_filename(file.filename); path=os.path.join(UPLOADS, filename); file.save(path)
-    try: text=extract_text(path)
-    except Exception as e:
-        if is_api: return jsonify({'error': f'Could not read resume: {e}'}), 400
-        flash(f'Could not read resume: {e}','error'); return redirect(url_for('dashboard'))
-    if not text.strip():
-        if is_api: return jsonify({'error': 'No readable text found in the resume.'}), 400
-        flash('No readable text found in the resume.','error'); return redirect(url_for('dashboard'))
-    skills=extract_skills(text)
-    con=db(); con.execute('DELETE FROM resumes WHERE user_id=?',(session['user_id'],)); con.execute('INSERT INTO resumes(user_id,filename,resume_text,skills,source_path,source_type) VALUES(?,?,?,?,?,?)',(session['user_id'],filename,text,', '.join(skills),path,ext)); con.commit(); con.close()
-    if is_api:
-        return jsonify({'status': 'ok', 'skills': skills, 'ats_score': ats_score(text), 'redirect': url_for('dashboard')})
-    flash(f'Resume analyzed. Found {len(skills)} skills.','success'); return redirect(url_for('dashboard'))
-
-@app.route('/update-resume', methods=['POST'])
-def update_resume():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    text = request.form.get('resume_text', '').strip()
-    if not text:
-        flash('Add some resume content before saving.', 'error')
-        return redirect(url_for('dashboard'))
-    con = db(); resume = con.execute('SELECT * FROM resumes WHERE user_id=? ORDER BY id DESC LIMIT 1', (session['user_id'],)).fetchone()
-    if resume and resume['source_type'] == 'docx' and resume['source_path'] and os.path.exists(resume['source_path']):
-        update_docx_in_place(resume['source_path'], text)
-    con.execute('UPDATE resumes SET resume_text=?, skills=? WHERE user_id=?', (text, ', '.join(extract_skills(text)), session['user_id'])); con.commit(); con.close()
-    flash('Resume updated and ready to download.', 'success')
-    return redirect(url_for('dashboard'))
-
-@app.route('/templates')
-def template_gallery():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    return render_template('template_gallery.html', template_groups=template_choices(), templates=TEMPLATES)
-
-@app.route('/builder')
-def builder_index():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    return redirect(url_for('template_gallery'))
-
-@app.route('/builder/<template_id>', methods=['GET', 'POST'])
-def builder(template_id):
-    if 'user_id' not in session: return redirect(url_for('login'))
-    template = get_template(template_id)
-    if not template: return redirect(url_for('template_gallery'))
-    con = db(); resume = con.execute('SELECT * FROM resumes WHERE user_id=? ORDER BY id DESC LIMIT 1', (session['user_id'],)).fetchone()
-    if request.method == 'POST':
-        text = builder_text(request.form)
-        if not text.strip():
-            flash('Add at least your name or one resume section before saving.', 'error')
-            return render_template('builder.html', template=template, values=request.form, ats=0)
-        filename = f'{template_id}_resume.docx'
-        skills = extract_skills(text)
-        if resume:
-            con.execute('UPDATE resumes SET filename=?, resume_text=?, skills=?, template_key=?, source_path=NULL, source_type=? WHERE user_id=?', (filename, text, ', '.join(skills), template_id, 'template', session['user_id']))
-        else:
-            con.execute('INSERT INTO resumes(user_id,filename,resume_text,skills,template_key,source_type) VALUES(?,?,?,?,?,?)', (session['user_id'], filename, text, ', '.join(skills), template_id, 'template'))
-        con.commit(); con.close()
-        flash('Resume saved with your selected template.', 'success')
-        return redirect(url_for('dashboard'))
-    con.close()
-    values = builder_values(resume)
-    return render_template('builder.html', template=template, values=values, ats=ats_score(resume['resume_text']) if resume else 0)
-
-@app.route('/ai-improve', methods=['POST'])
-def ai_improve():
-    if 'user_id' not in session: return jsonify({'error': 'Please log in first.'}), 401
-    payload = request.get_json(silent=True) or {}
-    text = payload.get('resume_text', '').strip()
-    if not text: return jsonify({'error': 'Add resume text first.'}), 400
-    return jsonify({'resume_text': ai_improve_resume(text, payload.get('target_role', ''))})
-
-@app.route('/download-resume')
-def download_resume():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    con = db(); resume = con.execute('SELECT * FROM resumes WHERE user_id=? ORDER BY id DESC LIMIT 1', (session['user_id'],)).fetchone(); con.close()
-    if not resume:
-        flash('Upload a resume before downloading.', 'error')
-        return redirect(url_for('dashboard'))
-    if resume['source_type'] == 'docx' and resume['source_path'] and os.path.exists(resume['source_path']):
-        return send_file(resume['source_path'], as_attachment=True, download_name='updated_resume.docx', mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-    from docx import Document
-    document = Document()
-    for line in resume['resume_text'].splitlines():
-        document.add_paragraph(line)
-    output = io.BytesIO(); document.save(output); output.seek(0)
-    return send_file(output, as_attachment=True, download_name='updated_resume.docx', mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-
-@app.route('/download-pdf')
-def download_pdf():
-    if 'user_id' not in session: return redirect(url_for('login'))
-    con = db(); resume = con.execute('SELECT * FROM resumes WHERE user_id=? ORDER BY id DESC LIMIT 1', (session['user_id'],)).fetchone(); con.close()
-    if not resume: return redirect(url_for('template_gallery'))
-    from reportlab.lib.pagesizes import LETTER
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-    output = io.BytesIO(); document = SimpleDocTemplate(output, pagesize=LETTER, rightMargin=.7*inch, leftMargin=.7*inch, topMargin=.65*inch, bottomMargin=.65*inch)
-    styles = getSampleStyleSheet(); body = ParagraphStyle('ResumeBody', parent=styles['BodyText'], fontName='Helvetica', fontSize=9.5, leading=13, spaceAfter=6); heading = ParagraphStyle('ResumeHeading', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, leading=14, spaceBefore=8, spaceAfter=4)
-    story = []
-    for line in resume['resume_text'].splitlines():
-        if not line.strip(): story.append(Spacer(1, 3)); continue
-        safe_line = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        style = heading if line.strip().isupper() else body
-        story.append(Paragraph(safe_line, style))
-    document.build(story); output.seek(0)
-    return send_file(output, as_attachment=True, download_name='resume_ats_ready.pdf', mimetype='application/pdf')
-
-@app.route('/new-resume/<template_key>')
-def new_resume(template_key):
-    if 'user_id' not in session: return redirect(url_for('login'))
-    if template_key not in RESUME_TEMPLATES: return redirect(url_for('dashboard'))
-    text = template_text(template_key)
-    con = db(); con.execute('DELETE FROM resumes WHERE user_id=?', (session['user_id'],)); con.execute('INSERT INTO resumes(user_id,filename,resume_text,skills,template_key,source_type) VALUES(?,?,?,?,?,?)', (session['user_id'], f'{template_key}_resume.docx', text, ', '.join(extract_skills(text)), template_key, 'template')); con.commit(); con.close()
-    flash(f'{RESUME_TEMPLATES[template_key][0]} template opened. Replace the placeholder data and save.', 'success')
-    return redirect(url_for('dashboard'))
-
-@app.route('/save-job/<int:job_id>', methods=['POST'])
-def save_job(job_id):
-    if 'user_id' not in session: return redirect(url_for('login'))
-    con=db(); resume=con.execute('SELECT * FROM resumes WHERE user_id=? ORDER BY id DESC LIMIT 1',(session['user_id'],)).fetchone(); job=con.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
-    if resume and job:
-        score=next((x['score'] for x in match_jobs(resume['resume_text'],[job]) if x['id']==job_id),0)
-        con.execute('INSERT INTO applications(user_id,job_id,match_percentage) VALUES(?,?,?)',(session['user_id'],job_id,score)); con.commit()
-    con.close(); flash('Job saved.','success'); return redirect(url_for('dashboard'))
-
-if __name__=='__main__':
-    port = int(os.environ.get('PORT', 5000))
-    init_db()
-    app.run(host='0.0.0.0', port=port)
-else: init_db()
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
