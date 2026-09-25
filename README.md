@@ -1,39 +1,76 @@
-# AI Resume Analyzer & Job Recommendation System
+# AI Resume Analyzer 📄🤖
 
-Ready-to-run B.Tech CSE minor project using Python Flask + JavaScript + HTML/CSS + SQLite + NLP/ML.
+An end-to-end AI-powered web application that evaluates resumes, highlights key strengths, identifies missing skills, and provides actionable recommendations to improve ATS compatibility and recruiter readability.
 
-## Features
-- Registration/login/logout with hashed passwords and sessions
-- PDF/DOCX resume upload
-- Resume text extraction
-- Skill extraction
-- TF-IDF + cosine similarity
-- Skill-based + NLP job matching
-- Job recommendation dashboard
-- Save job functionality
-- SQLite database (no MySQL setup required)
+🔗 **Live Demo:** [ai-resume-analyzer-production-533f.up.railway.app](https://ai-resume-analyzer-production-533f.up.railway.app)[cite: 2]
 
-## Run
-1. Install Python 3.10+.
-2. Open this folder in VS Code.
-3. Create environment: `python -m venv .venv`
-4. Activate it (Windows): `.venv\\Scripts\\activate`
-5. Install packages: `pip install -r requirements.txt`
-6. Run: `python app.py`
-7. Open: `http://127.0.0.1:5000`
+---
 
-The SQLite database is created automatically on first run and sample jobs are inserted automatically.
+## 🚀 Features
 
-## Railway deployment
+* **Resume Parsing & Evaluation:** Extracts and structures data from uploaded resumes (PDF/DOCX).
+* **ATS Compatibility & Score:** Analyzes formatting, keyword placement, and structure to generate an ATS score.
+* **Skill Gap Analysis:** Highlights missing industry-relevant technical and soft skills.
+* **Actionable Feedback:** Provides specific recommendations on phrasing, impact metrics, and readability.
+* **Production-Ready Deployment:** Containerized and served with Gunicorn for stable cloud hosting.
 
-This repository is a Flask application deployed from the repository root. Railway uses the root-level `Procfile` and starts `app:app` with Gunicorn. Set `APP_ENV=production`, a strong `SECRET_KEY`, and `FRONTEND_URL` to the exact browser origin that is allowed to call the backend. Railway provides `PORT` automatically.
+---
 
-SQLite and uploaded files use the local filesystem by default. For production persistence, attach a Railway Volume and set `DATABASE_PATH` and `UPLOADS_DIR` to paths on that volume, or migrate the existing database layer to a managed database/object store.
+## 🛠️ Tech Stack
 
-There is currently no React/Vite frontend in this repository. The UI is Flask/Jinja with static JavaScript and CSS, so there is no Vercel project, `VITE_API_URL`, `package.json`, or frontend root directory to configure from this repository.
+* **Backend:** Python, Flask, Gunicorn
+* **Frontend:** HTML5, CSS3, JavaScript
+* **NLP & Processing:** PyPDF2 / pdfplumber, NLTK, Scikit-learn
+* **Deployment & Hosting:** Railway, Git
 
-## Project flow
-Register -> Login -> Dashboard -> Upload PDF/DOCX -> Extract text -> Extract skills -> TF-IDF/cosine similarity + skill matching -> Match percentage -> Job recommendations -> Save job.
+---
 
-## Important
-This is a complete working academic/demo version. For production deployment, replace the development secret key, add CSRF protection, stronger validation, persistent production database, logging, and secure file storage.
+## 📂 Project Structure
+
+AI-Resume-Analyzer/
+├── static/
+├── templates/
+├── app.py
+├── requirements.txt
+├── Procfile
+└── README.md
+
+---
+
+## ⚙️ Local Setup & Installation
+
+1. Clone the repository:
+git clone https://github.com/syedaarish/AI-Resume-Analyzer.git
+cd AI-Resume-Analyzer
+
+2. Create and activate a virtual environment:
+python -m venv .venv
+.venv\Scripts\activate
+
+3. Install dependencies:
+pip install -r requirements.txt
+
+4. Run the application:
+python app.py
+
+---
+
+## ☁️ Deployment
+
+The project is configured for deployment on Railway using Gunicorn:
+
+gunicorn app:app --bind 0.0.0.0:$PORT
+
+---
+
+## 👨‍💻 Author
+
+**Aarish Nasim**
+* Email: syedaarish00786@gmail.com
+* GitHub: https://github.com/syedaarish
+
+---
+
+## 📜 License
+
+This project is licensed under the MIT License.
