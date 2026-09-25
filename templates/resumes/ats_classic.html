@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>{{ personal.full_name or "Resume" }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0.65in 0.7in;
+        }
+
+        :root {
+            color: #111827;
+            font-family: Helvetica, Arial, Calibri, sans-serif;
+            font-size: 10pt;
+            line-height: 1.35;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .resume-header {
+            border-bottom: 1.5pt solid #111827;
+            padding-bottom: 9pt;
+            margin-bottom: 13pt;
+        }
+
+        h1 {
+            font-size: 23pt;
+            line-height: 1.05;
+            margin: 0 0 3pt;
+            letter-spacing: 0.2pt;
+        }
+
+        .headline {
+            font-size: 11pt;
+            font-weight: bold;
+            margin: 0 0 6pt;
+        }
+
+        .contact-line,
+        .links-line {
+            color: #374151;
+            font-size: 9pt;
+            margin: 1pt 0;
+        }
+
+        .contact-line span + span::before,
+        .links-line a + a::before {
+            content: " | ";
+            color: #9ca3af;
+        }
+
+        section {
+            margin: 0 0 12pt;
+            page-break-inside: avoid;
+        }
+
+        h2 {
+            border-bottom: 0.75pt solid #9ca3af;
+            color: #111827;
+            font-size: 11pt;
+            letter-spacing: 0.7pt;
+            line-height: 1.1;
+            margin: 0 0 6pt;
+            padding-bottom: 3pt;
+            text-transform: uppercase;
+        }
+
+        p {
+            margin: 0 0 4pt;
+        }
+
+        .entry {
+            margin: 0 0 9pt;
+            page-break-inside: avoid;
+        }
+
+        .entry:last-child {
+            margin-bottom: 0;
+        }
+
+        .entry-heading {
+            align-items: baseline;
+            display: flex;
+            justify-content: space-between;
+            gap: 12pt;
+        }
+
+        .entry-title,
+        .entry-name {
+            font-weight: bold;
+        }
+
+        .entry-meta {
+            color: #374151;
+            font-size: 9pt;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .entry-subtitle {
+            color: #374151;
+            font-size: 9.5pt;
+            margin: 1pt 0 3pt;
+        }
+
+        ul {
+            margin: 3pt 0 0 15pt;
+            padding: 0;
+        }
+
+        li {
+            margin: 0 0 3pt;
+            padding-left: 2pt;
+        }
+
+        .skill-group {
+            margin: 0 0 3pt;
+        }
+
+        .skill-label {
+            font-weight: bold;
+        }
+
+        .inline-list {
+            margin: 0;
+        }
+
+        @media print {
+            a {
+                text-decoration: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="resume-header">
+        {% if personal.full_name %}<h1>{{ personal.full_name }}</h1>{% endif %}
+        {% if personal.headline %}<p class="headline">{{ personal.headline }}</p>{% endif %}
+        {% if personal.contact_items %}
+        <p class="contact-line">
+            {% for item in personal.contact_items %}<span>{{ item }}</span>{% endfor %}
+        </p>
+        {% endif %}
+        {% if personal.links %}
+        <p class="links-line">
+            {% for link in personal.links %}<a href="{{ link.url }}">{{ link.label }}</a>{% endfor %}
+        </p>
+        {% endif %}
+    </header>
+
+    {% if summary %}
+    <section>
+        <h2>Summary</h2>
+        <p>{{ summary }}</p>
+    </section>
+    {% endif %}
+
+    {% if skills %}
+    <section>
+        <h2>Technical Skills</h2>
+        {% for group in skills %}
+        {% if group['items'] %}<p class="skill-group"><span class="skill-label">{{ group['label'] }}:</span> {{ group['items'] | join(", ") }}</p>{% endif %}
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if experience %}
+    <section>
+        <h2>Work Experience</h2>
+        {% for entry in experience %}
+        <article class="entry">
+            <div class="entry-heading">
+                <span class="entry-title">{{ entry.title }}</span>
+                {% if entry.dates %}<span class="entry-meta">{{ entry.dates }}</span>{% endif %}
+            </div>
+            {% if entry.organization or entry.location %}<p class="entry-subtitle">{{ entry.organization }}{% if entry.organization and entry.location %} | {% endif %}{{ entry.location }}</p>{% endif %}
+            {% if entry.bullets %}<ul>{% for bullet in entry.bullets %}<li>{{ bullet }}</li>{% endfor %}</ul>{% endif %}
+            {% if entry.description %}<p>{{ entry.description }}</p>{% endif %}
+        </article>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if projects %}
+    <section>
+        <h2>Projects</h2>
+        {% for project in projects %}
+        <article class="entry">
+            <div class="entry-heading">
+                <span class="entry-name">{% if project.url %}<a href="{{ project.url }}">{{ project.name }}</a>{% else %}{{ project.name }}{% endif %}</span>
+                {% if project.dates %}<span class="entry-meta">{{ project.dates }}</span>{% endif %}
+            </div>
+            {% if project.technologies %}<p class="entry-subtitle">{{ project.technologies | join(", ") }}</p>{% endif %}
+            {% if project.bullets %}<ul>{% for bullet in project.bullets %}<li>{{ bullet }}</li>{% endfor %}</ul>{% endif %}
+            {% if project.description %}<p>{{ project.description }}</p>{% endif %}
+        </article>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if education %}
+    <section>
+        <h2>Education</h2>
+        {% for entry in education %}
+        <article class="entry">
+            <div class="entry-heading">
+                <span class="entry-title">{{ entry.degree }}</span>
+                {% if entry.dates %}<span class="entry-meta">{{ entry.dates }}</span>{% endif %}
+            </div>
+            {% if entry.institution or entry.location %}<p class="entry-subtitle">{{ entry.institution }}{% if entry.institution and entry.location %} | {% endif %}{{ entry.location }}</p>{% endif %}
+            {% if entry.details %}<p>{{ entry.details }}</p>{% endif %}
+        </article>
+        {% endfor %}
+    </section>
+    {% endif %}
+</body>
+</html>

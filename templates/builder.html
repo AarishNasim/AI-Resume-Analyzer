@@ -10,8 +10,8 @@
 </head>
 <body class="builder-shell">
     <nav class="topbar">
-        <a class="brand" href="{{url_for('dashboard')}}"><span class="brand-mark">RA</span><span>Resume Atlas</span></a>
-        <div class="builder-nav"><span class="template-chip" style="--accent:{{template.accent}}">{{template.name}}</span><a href="{{url_for('template_gallery')}}" id="switch-template">Switch template</a><a href="{{url_for('dashboard')}}">Exit builder</a></div>
+        <a class="brand" href="{{url_for('analyzer.dashboard')}}"><span class="brand-mark">RA</span><span>Resume Atlas</span></a>
+        <div class="builder-nav"><span class="template-chip" style="--accent:{{template.accent}}">{{template.name}}</span><a href="{{url_for('builder.gallery')}}" id="switch-template">Switch template</a><a href="{{url_for('analyzer.dashboard')}}">Exit builder</a></div>
     </nav>
     <main class="builder-layout">
         <section class="builder-form-panel">
@@ -22,7 +22,7 @@
                 <div class="form-step"><div class="step-title"><span>03</span><div><h2>Experience</h2><p>Lead with outcomes, not task lists.</p></div></div><textarea name="experience" data-preview="experience" placeholder="Software Engineer Intern | Company | Dates&#10;- Increased delivery speed by 32% through...">{{values.get('experience','')}}</textarea></div>
                 <div class="form-step"><div class="step-title"><span>04</span><div><h2>Education &amp; projects</h2><p>Add the context behind your craft.</p></div></div><textarea name="education" data-preview="education" placeholder="B.Tech Computer Science and Engineering | University | Year">{{values.get('education','')}}</textarea><textarea name="projects" data-preview="projects" placeholder="Project name | What you built and why it mattered">{{values.get('projects','')}}</textarea></div>
                 <div class="form-step"><div class="step-title"><span>05</span><div><h2>Skills</h2><p>Make your strongest signal easy to find.</p></div></div><input name="skills" data-preview="skills" value="{{values.get('skills','')}}" placeholder="Python, JavaScript, Flask, React, SQL"></div>
-                <div class="builder-actions"><button class="button button-dark" type="submit">Save resume</button><a class="button button-light" href="{{url_for('dashboard')}}">Save later</a></div>
+                <div class="builder-actions"><button class="button button-dark" type="submit">Save resume</button><a class="button button-light" href="{{url_for('analyzer.dashboard')}}">Save later</a></div>
             </form>
         </section>
         <aside class="preview-panel">
